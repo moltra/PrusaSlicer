@@ -312,25 +312,38 @@ CompactBridge::CompactBridge(const Vec3d &sp,
                              bool         endball,
                              size_t       steps)
 {
-    Vec3d startp = sp + r * n;
-    Vec3d dir = (ep - startp).normalized();
-    Vec3d endp = ep - r * dir;
-    
-    Bridge br(startp, endp, r, steps);
-    mesh.merge(br.mesh);
-    
-    // now add the pins
-    double fa = 2*PI/steps;
-    auto upperball = sphere(r, Portion{PI / 2 - fa, PI}, fa);
-    for(auto& p : upperball.points) p += startp;
-    
-    if(endball) {
-        auto lowerball = sphere(r, Portion{0, PI/2 + 2*fa}, fa);
-        for(auto& p : lowerball.points) p += endp;
-        mesh.merge(lowerball);
+    double fa = 2 * PI / steps;
+    auto ball  = sphere(r, Portion{0, PI}, fa);
+    auto sball = ball; // sphere(r, Portion{PI / 2 - fa, PI}, fa);
+    for(auto& p : sball.points) p += sp;
+
+    mesh.merge(Bridge{sp, ep, r, steps}.mesh);
+    mesh.merge(sball);
+    if (endball) {
+        auto eball = ball;// sphere(r, Portion{0, PI + 2*fa}, fa);
+        for(auto& p : eball.points) p += ep;
+        mesh.merge(eball);
     }
+
+//    Vec3d startp = sp + r * n;
+//    Vec3d dir = (ep - startp).normalized();
+//    Vec3d endp = ep - r * dir;
     
-    mesh.merge(upperball);
+//    Bridge br(startp, endp, r, steps);
+//    mesh.merge(br.mesh);
+    
+//    // now add the pins
+//    double fa = 2*PI/steps;
+//    auto upperball = sphere(r, Portion{PI / 2 - fa, PI}, fa);
+//    for(auto& p : upperball.points) p += startp;
+    
+//    if(endball) {
+//        auto lowerball = sphere(r, Portion{0, PI/2 + 2*fa}, fa);
+//        for(auto& p : lowerball.points) p += endp;
+//        mesh.merge(lowerball);
+//    }
+    
+//    mesh.merge(upperball);
 }
 
 Pad::Pad(const TriangleMesh &support_mesh,

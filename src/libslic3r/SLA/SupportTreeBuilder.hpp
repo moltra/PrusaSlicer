@@ -216,7 +216,7 @@ struct Bridge {
 struct CompactBridge {
     Contour3D mesh;
     long id = ID_UNSET;
-    
+
     CompactBridge(const Vec3d& sp,
                   const Vec3d& ep,
                   const Vec3d& n,

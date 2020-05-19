@@ -202,6 +202,7 @@ class SupportTreeBuildsteps {
 
     // A spatial index to easily find strong pillars to connect to.
     PillarIndex m_pillar_index;
+    PillarIndex m_minipillar_index;
 
     // When bridging heads to pillars... TODO: find a cleaner solution
     ccr::BlockingMutex m_bridge_mutex;
@@ -229,11 +230,6 @@ class SupportTreeBuildsteps {
         double r_pin,
         double r_back,
         double width);
-    
-    template<class...Args>
-    inline double pinhead_mesh_distance(Args&&...args) {
-        return pinhead_mesh_intersect(std::forward<Args>(args)...).distance();
-    }
 
     // Checking bridge (pillar and stick as well) intersection with the model.
     // If the function is used for headless sticks, the ins_check parameter
@@ -268,8 +264,42 @@ class SupportTreeBuildsteps {
     inline bool connect_to_ground(Head& head);
     
     bool connect_to_model_body(Head &head);
-    
-    bool search_pillar_and_connect(const Head& head);
+
+    template<class S> bool search_pillar_and_connect(const S& source)
+    {
+        // Hope that a local copy takes less time than the whole search loop.
+        // We also need to remove elements progressively from the copied index.
+        PointIndex spindex = m_pillar_index.guarded_clone();
+
+        long nearest_id = ID_UNSET;
+
+        Vec3d querypt = source.junction_point();
+
+        while(nearest_id < 0 && !spindex.empty()) { m_thr();
+            // loop until a suitable head is not found
+            // if there is a pillar closer than the cluster center
+            // (this may happen as the clustering is not perfect)
+            // than we will bridge to this closer pillar
+
+            Vec3d qp(querypt(X), querypt(Y), m_builder.ground_level);
+            auto qres = spindex.nearest(qp, 1);
+            if(qres.empty()) break;
+
+            auto ne = qres.front();
+            nearest_id = ne.second;
+
+            if(nearest_id >= 0) {
+                if(size_t(nearest_id) < m_builder.pillarcount()) {
+                    if(!connect_to_nearpillar(source, nearest_id)) {
+                        nearest_id = ID_UNSET;    // continue searching
+                        spindex.remove(ne);       // without the current pillar
+                    }
+                }
+            }
+        }
+
+        return nearest_id >= 0;
+    }
     
     // This is a proxy function for pillar creation which will mind the gap
     // between the pad and the model bottom in zero elevation mode.
