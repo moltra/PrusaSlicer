@@ -520,42 +520,6 @@ bool SupportTreeBuildsteps::connect_to_nearpillar(const Head &head,
     return true;
 }
 
-//bool SupportTreeBuildsteps::search_pillar_and_connect(const Head &head)
-//{
-//    // Hope that a local copy takes less time than the whole search loop.
-//    // We also need to remove elements progressively from the copied index.
-//    PointIndex spindex = m_pillar_index.guarded_clone();
-    
-//    long nearest_id = ID_UNSET;
-    
-//    Vec3d querypoint = head.junction_point();
-    
-//    while(nearest_id < 0 && !spindex.empty()) { m_thr();
-//        // loop until a suitable head is not found
-//        // if there is a pillar closer than the cluster center
-//        // (this may happen as the clustering is not perfect)
-//        // than we will bridge to this closer pillar
-        
-//        Vec3d qp(querypoint(X), querypoint(Y), m_builder.ground_level);
-//        auto qres = spindex.nearest(qp, 1);
-//        if(qres.empty()) break;
-        
-//        auto ne = qres.front();
-//        nearest_id = ne.second;
-        
-//        if(nearest_id >= 0) {
-//            if(size_t(nearest_id) < m_builder.pillarcount()) {
-//                if(!connect_to_nearpillar(head, nearest_id)) {
-//                    nearest_id = ID_UNSET;    // continue searching
-//                    spindex.remove(ne);       // without the current pillar
-//                }
-//            }
-//        }
-//    }
-    
-//    return nearest_id >= 0;
-//}
-
 void SupportTreeBuildsteps::create_ground_pillar(const Vec3d &jp,
                                                  const Vec3d &sourcedir,
                                                  double       radius,
@@ -946,7 +910,7 @@ bool SupportTreeBuildsteps::connect_to_ground(Head &head, const Vec3d &dir)
     double r = head.r_back_mm;
     double t = bridge_mesh_distance(hjp, dir, head.r_back_mm);
     double d = 0, tdown = 0;
-    t = std::min(t, m_cfg.max_bridge_length_mm);
+    t = std::min(t, m_cfg.max_bridge_length_mm * head.r_back_mm / m_cfg.head_back_radius_mm );
 
     while (d < t && !std::isinf(tdown = bridge_mesh_distance(hjp + d * dir, DOWN, r)))
         d += r;
@@ -1044,6 +1008,42 @@ bool SupportTreeBuildsteps::connect_to_model_body(Head &head)
     return true;
 }
 
+bool SupportTreeBuildsteps::search_pillar_and_connect(const Head &source)
+{
+    // Hope that a local copy takes less time than the whole search loop.
+    // We also need to remove elements progressively from the copied index.
+    PointIndex spindex = m_pillar_index.guarded_clone();
+
+    long nearest_id = ID_UNSET;
+
+    Vec3d querypt = source.junction_point();
+
+    while(nearest_id < 0 && !spindex.empty()) { m_thr();
+        // loop until a suitable head is not found
+        // if there is a pillar closer than the cluster center
+        // (this may happen as the clustering is not perfect)
+        // than we will bridge to this closer pillar
+
+        Vec3d qp(querypt(X), querypt(Y), m_builder.ground_level);
+        auto qres = spindex.nearest(qp, 1);
+        if(qres.empty()) break;
+
+        auto ne = qres.front();
+        nearest_id = ne.second;
+
+        if(nearest_id >= 0) {
+            if(size_t(nearest_id) < m_builder.pillarcount()) {
+                if(!connect_to_nearpillar(source, nearest_id)) {
+                    nearest_id = ID_UNSET;    // continue searching
+                    spindex.remove(ne);       // without the current pillar
+                }
+            }
+        }
+    }
+
+    return nearest_id >= 0;
+}
+
 void SupportTreeBuildsteps::routing_to_model()
 {   
     // We need to check if there is an easy way out to the bed surface.
@@ -1068,7 +1068,7 @@ void SupportTreeBuildsteps::routing_to_model()
         
         // We have failed to route this head.
         BOOST_LOG_TRIVIAL(warning)
-            << "Failed to route model facing support point. ID: " << idx;
+                << "Failed to route model facing support point. ID: " << idx;
         
         head.invalidate();
     });
@@ -1302,88 +1302,31 @@ void SupportTreeBuildsteps::routing_headless()
         // Get an initial normal from the filtering step
         Vec3d n = m_support_nmls.row(i);
 
+        // First we need to determine the available space for a mini pinhead.
+        // The goal is the move away from the model a little bit to make the
+        // contact point small as possible and avoid pearcing the model body.
+        double pin_space = std::min(2 * R, bridge_mesh_distance(sph, DOWN, R, true));
+
+        auto &head = m_builder.add_head(i, R, R, pin_space,
+                                        m_cfg.head_penetration_mm, n, sph);
+
         // Here the steps will be similar as in route_to_model step:
         // 1. Search for a nearby pillar, include other mini pillars
 
+        // Search nearby pillar
+        if (search_pillar_and_connect(head)) { head.transform(); continue; }
 
+        // Cannot connect to nearby pillar. We will try to search for
+        // a route to the ground.
+        if (connect_to_ground(head)) { head.transform(); continue; }
 
-        // Try the path straight down
-        double downdst = bridge_mesh_distance(sph, DOWN, R, true);
-        if (std::isinf(downdst)) {
-            downdst = sph(Z) - m_builder.ground_level;
-            Vec3d sj = sph - (m_cfg.head_penetration_mm - R) * n;
-            Vec3d ej = sph + downdst * DOWN;
-            m_builder.add_compact_bridge(sj, sph, n, R, false);
-            m_builder.add_compact_bridge(sph, ej, DOWN, R, false);
-        }
+        // No route to the ground, so connect to the model body as a last resort
+        if (connect_to_model_body(head)) { continue; }
 
-        // We need a suitable normal and a junction point from where the
-        // support can be routed straight down
-
-//        double idist   = bridge_mesh_distance(sph, n, R, true);
-//        if (idist < 2 * R) {
-//            // Try to find another normal that allows a longer mini bridge for
-//            // the new mini pillar
-//            // [n, idist] = optimize_max([](azm, plr){});
-
-//        }
-
-//        double brdst = 0., downdst = 0.;
-//        while (brdst < idist &&
-//               (downdst = bridge_mesh_distance(sph + n * brdst, DOWN, R) < 2 * R))
-//            brdst += 2 * R;
-
-////        idist = std::min(2 * R, idist);
-
-//        // Get the center of the ball penetrated into the model body
-//        Vec3d sp = sph - n * (m_cfg.head_penetration_mm - R);
-
-//        // Turning point ball center
-//        Vec3d tp = sph + n * (idist - R);
-
-//        // Sample the distance available straight down in Z axis
-//        double ddist = bridge_mesh_distance(tp, DOWN, R);
-
-//        double gdist = ddist; // ground distance
-//        if (std::isinf(gdist)) gdist = tp(Z) - m_builder.ground_level;
-//        Vec3d ej = tp + (gdist + m_cfg.head_penetration_mm - R) * DOWN ;
-
-//        // now build the support
-//        m_builder.add_compact_bridge(sp, tp, n, R, false /*no endball*/);
-//        m_builder.add_compact_bridge(tp, ej, DOWN, R, !std::isinf(ddist));
-
-
-
-
-
-
-//        const auto R = double(m_support_pts[i].head_front_radius);
-//        const double HWIDTH_MM = std::min(R, m_cfg.head_penetration_mm);
-        
-//        // Exact support position
-//        Vec3d sph = m_support_pts[i].pos.cast<double>();
-//        Vec3d n = m_support_nmls.row(i);   // mesh outward normal
-//        Vec3d sp = sph - n * HWIDTH_MM;     // stick head start point
-        
-//        Vec3d sj = sp + R * n;              // stick start point
-        
-//        // This is only for checking
-//        double idist = bridge_mesh_distance(sph, DOWN, R, true);
-//        double realdist = ray_mesh_intersect(sph, DOWN).distance();
-//        double dist = realdist;
-        
-//        if (std::isinf(dist)) dist = sph(Z) - m_builder.ground_level;
-        
-//        if(std::isnan(idist) || idist < 2*R || std::isnan(dist) || dist < 2*R) {
-//            BOOST_LOG_TRIVIAL(warning) << "Can not find route for headless"
-//                                       << " support stick at: "
-//                                       << sj.transpose();
-//            continue;
-//        }
-        
-//        bool use_endball = !std::isinf(realdist);
-//        Vec3d ej = sj + (dist + HWIDTH_MM) * DOWN ;
-//        m_builder.add_compact_bridge(sp, ej, n, R, use_endball);
+        BOOST_LOG_TRIVIAL(warning) << "Can not find route for headless"
+                                   << " support stick at: "
+                                   << sph.transpose();
+        head.invalidate();
     }
 }
 

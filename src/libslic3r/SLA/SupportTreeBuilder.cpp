@@ -305,47 +305,6 @@ Bridge::Bridge(const Vec3d &j1, const Vec3d &j2, double r_mm, size_t steps):
     for(auto& p : mesh.points) p = quater * p + j1;
 }
 
-CompactBridge::CompactBridge(const Vec3d &sp,
-                             const Vec3d &ep,
-                             const Vec3d &n,
-                             double       r,
-                             bool         endball,
-                             size_t       steps)
-{
-    double fa = 2 * PI / steps;
-    auto ball  = sphere(r, Portion{0, PI}, fa);
-    auto sball = ball; // sphere(r, Portion{PI / 2 - fa, PI}, fa);
-    for(auto& p : sball.points) p += sp;
-
-    mesh.merge(Bridge{sp, ep, r, steps}.mesh);
-    mesh.merge(sball);
-    if (endball) {
-        auto eball = ball;// sphere(r, Portion{0, PI + 2*fa}, fa);
-        for(auto& p : eball.points) p += ep;
-        mesh.merge(eball);
-    }
-
-//    Vec3d startp = sp + r * n;
-//    Vec3d dir = (ep - startp).normalized();
-//    Vec3d endp = ep - r * dir;
-    
-//    Bridge br(startp, endp, r, steps);
-//    mesh.merge(br.mesh);
-    
-//    // now add the pins
-//    double fa = 2*PI/steps;
-//    auto upperball = sphere(r, Portion{PI / 2 - fa, PI}, fa);
-//    for(auto& p : upperball.points) p += startp;
-    
-//    if(endball) {
-//        auto lowerball = sphere(r, Portion{0, PI/2 + 2*fa}, fa);
-//        for(auto& p : lowerball.points) p += endp;
-//        mesh.merge(lowerball);
-//    }
-    
-//    mesh.merge(upperball);
-}
-
 Pad::Pad(const TriangleMesh &support_mesh,
          const ExPolygons &  model_contours,
          double              ground_level,
@@ -381,7 +340,6 @@ SupportTreeBuilder::SupportTreeBuilder(SupportTreeBuilder &&o)
     , m_pillars{std::move(o.m_pillars)}
     , m_bridges{std::move(o.m_bridges)}
     , m_crossbridges{std::move(o.m_crossbridges)}
-    , m_compact_bridges{std::move(o.m_compact_bridges)}
     , m_pad{std::move(o.m_pad)}
     , m_meshcache{std::move(o.m_meshcache)}
     , m_meshcache_valid{o.m_meshcache_valid}
@@ -395,7 +353,6 @@ SupportTreeBuilder::SupportTreeBuilder(const SupportTreeBuilder &o)
     , m_pillars{o.m_pillars}
     , m_bridges{o.m_bridges}
     , m_crossbridges{o.m_crossbridges}
-    , m_compact_bridges{o.m_compact_bridges}
     , m_pad{o.m_pad}
     , m_meshcache{o.m_meshcache}
     , m_meshcache_valid{o.m_meshcache_valid}
@@ -410,7 +367,6 @@ SupportTreeBuilder &SupportTreeBuilder::operator=(SupportTreeBuilder &&o)
     m_pillars = std::move(o.m_pillars);
     m_bridges = std::move(o.m_bridges);
     m_crossbridges = std::move(o.m_crossbridges);
-    m_compact_bridges = std::move(o.m_compact_bridges);
     m_pad = std::move(o.m_pad);
     m_meshcache = std::move(o.m_meshcache);
     m_meshcache_valid = o.m_meshcache_valid;
@@ -426,7 +382,6 @@ SupportTreeBuilder &SupportTreeBuilder::operator=(const SupportTreeBuilder &o)
     m_pillars = o.m_pillars;
     m_bridges = o.m_bridges;
     m_crossbridges = o.m_crossbridges;
-    m_compact_bridges = o.m_compact_bridges;
     m_pad = o.m_pad;
     m_meshcache = o.m_meshcache;
     m_meshcache_valid = o.m_meshcache_valid;
@@ -456,12 +411,7 @@ const TriangleMesh &SupportTreeBuilder::merged_mesh() const
         if (ctl().stopcondition()) break;
         merged.merge(j.mesh);
     }
-    
-    for (auto &cb : m_compact_bridges) {
-        if (ctl().stopcondition()) break;
-        merged.merge(cb.mesh);
-    }
-    
+
     for (auto &bs : m_bridges) {
         if (ctl().stopcondition()) break;
         merged.merge(bs.mesh);
@@ -512,7 +462,6 @@ const TriangleMesh &SupportTreeBuilder::merge_and_cleanup()
     m_pillars = {};
     m_junctions = {};
     m_bridges = {};
-    m_compact_bridges = {};
     
     return ret;
 }

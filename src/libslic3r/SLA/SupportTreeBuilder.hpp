@@ -211,20 +211,6 @@ struct Bridge {
            size_t       steps = 45);
 };
 
-// A bridge that spans from model surface to model surface with small connecting
-// edges on the endpoints. Used for headless support points.
-struct CompactBridge {
-    Contour3D mesh;
-    long id = ID_UNSET;
-
-    CompactBridge(const Vec3d& sp,
-                  const Vec3d& ep,
-                  const Vec3d& n,
-                  double r,
-                  bool endball = true,
-                  size_t steps = 45);
-};
-
 // A wrapper struct around the pad
 struct Pad {
     TriangleMesh tmesh;
@@ -264,7 +250,6 @@ class SupportTreeBuilder: public SupportTree {
     std::vector<Junction> m_junctions;
     std::vector<Bridge> m_bridges;
     std::vector<Bridge> m_crossbridges;
-    std::vector<CompactBridge> m_compact_bridges;    
     Pad m_pad;
     
     using Mutex = ccr::SpinningMutex;
@@ -413,15 +398,6 @@ public:
     template<class...Args> const Bridge& add_crossbridge(Args&&... args)
     {
         return _add_bridge(m_crossbridges, std::forward<Args>(args)...);
-    }
-    
-    template<class...Args> const CompactBridge& add_compact_bridge(Args&&...args)
-    {
-        std::lock_guard<Mutex> lk(m_mutex);
-        m_compact_bridges.emplace_back(std::forward<Args>(args)...);
-        m_compact_bridges.back().id = long(m_compact_bridges.size() - 1);
-        m_meshcache_valid = false;
-        return m_compact_bridges.back();
     }
     
     Head &head(unsigned id)
