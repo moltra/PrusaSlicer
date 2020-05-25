@@ -136,7 +136,8 @@ void test_supports(const std::string          &obj_filename,
     
     // Generate the actual support tree
     sla::SupportTreeBuilder treebuilder;
-    treebuilder.build(sla::SupportableMesh{emesh, support_points, supportcfg});
+    sla::SupportableMesh    sm{emesh, support_points, supportcfg};
+    sla::SupportTreeBuildsteps::execute(treebuilder, sm);
     
     check_support_tree_integrity(treebuilder, supportcfg);
     

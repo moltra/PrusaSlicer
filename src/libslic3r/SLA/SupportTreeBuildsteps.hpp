@@ -202,7 +202,6 @@ class SupportTreeBuildsteps {
 
     // A spatial index to easily find strong pillars to connect to.
     PillarIndex m_pillar_index;
-    PillarIndex m_minipillar_index;
 
     // When bridging heads to pillars... TODO: find a cleaner solution
     ccr::BlockingMutex m_bridge_mutex;

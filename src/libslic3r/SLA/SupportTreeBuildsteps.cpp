@@ -42,6 +42,8 @@ bool SupportTreeBuildsteps::execute(SupportTreeBuilder &   builder,
 {
     if(sm.pts.empty()) return false;
     
+    builder.ground_level = sm.emesh.ground_level() - sm.cfg.object_elevation_mm;
+
     SupportTreeBuildsteps alg(builder, sm);
     
     // Let's define the individual steps of the processing. We can experiment
@@ -166,64 +168,6 @@ bool SupportTreeBuildsteps::execute(SupportTreeBuilder &   builder,
     return pc == ABORT;
 }
 
-// Give points on a 3D ring with given center, radius and orientation
-// method based on:
-// https://math.stackexchange.com/questions/73237/parametric-equation-of-a-circle-in-3d-space
-template<size_t N>
-class PointRing {
-    std::array<double, N> m_phis;
-    
-    // Two vectors that will be perpendicular to each other and to the
-    // axis. Values for a(X) and a(Y) are now arbitrary, a(Z) is just a
-    // placeholder.
-    // a and b vectors are perpendicular to the ring direction and to each other.
-    // Together they define the plane where we have to iterate with the
-    // given angles in the 'm_phis' vector
-    Vec3d a = {0, 1, 0}, b;
-    double m_radius = 0.;
-    
-    static inline bool constexpr is_one(double val) 
-    { 
-        return std::abs(std::abs(val) - 1) < 1e-20;
-    }
-    
-public:
-    
-    PointRing(const Vec3d &n)
-    {
-        m_phis = linspace_array<N>(0., 2 * PI);
-    
-        // We have to address the case when the direction vector v (same as
-        // dir) is coincident with one of the world axes. In this case two of
-        // its components will be completely zero and one is 1.0. Our method
-        // becomes dangerous here due to division with zero. Instead, vector
-        // 'a' can be an element-wise rotated version of 'v'
-        if(is_one(n(X)) || is_one(n(Y)) || is_one(n(Z))) {
-            a = {n(Z), n(X), n(Y)};
-            b = {n(Y), n(Z), n(X)};
-        }
-        else {
-            a(Z) = -(n(Y)*a(Y)) / n(Z); a.normalize();
-            b = a.cross(n);
-        }
-    }
-    
-    Vec3d get(size_t idx, const Vec3d src, double r) const
-    {
-        double phi = m_phis[idx];
-        double sinphi = std::sin(phi);
-        double cosphi = std::cos(phi);
-     
-        double rpscos = r * cosphi;
-        double rpssin = r * sinphi;
-     
-        // Point on the sphere
-        return {src(X) + rpscos * a(X) + rpssin * b(X),
-                src(Y) + rpscos * a(Y) + rpssin * b(Y),
-                src(Z) + rpscos * a(Z) + rpssin * b(Z)};
-    }
-};
-
 template<class C, class Hit = EigenMesh3D::hit_result> 
 static Hit min_hit(const C &hits)
 {
@@ -321,12 +265,12 @@ EigenMesh3D::hit_result SupportTreeBuildsteps::bridge_mesh_intersect(
     
     // Hit results
     std::array<Hit, SAMPLES> hits;
+
+    const double sd = 0.;//r * m_cfg.safety_distance_mm / m_cfg.head_back_radius_mm;
     
     ccr::enumerate(hits.begin(), hits.end(), 
-                   [this, r, src, ins_check, &ring, dir] (Hit &hit, size_t i) {
-        
-        const double sd = m_cfg.safety_distance_mm;
-        
+                [this, r, src, ins_check, &ring, dir, sd] (Hit &hit, size_t i) {
+
         // Point on the circle on the pin sphere
         Vec3d p = ring.get(i, src, r + sd);
         
@@ -1305,10 +1249,20 @@ void SupportTreeBuildsteps::routing_headless()
         // First we need to determine the available space for a mini pinhead.
         // The goal is the move away from the model a little bit to make the
         // contact point small as possible and avoid pearcing the model body.
-        double pin_space = std::min(2 * R, bridge_mesh_distance(sph, DOWN, R, true));
+        double pin_space = std::min(2 * R, bridge_mesh_distance(sph, n, R, true));
+
+        if (pin_space <= 0) continue;
 
         auto &head = m_builder.add_head(i, R, R, pin_space,
                                         m_cfg.head_penetration_mm, n, sph);
+
+        // collision check
+
+        if (!m_cfg.ground_facing_only) {
+            m_head_to_ground_scans[i] =
+                bridge_mesh_intersect(head.junction_point(), DOWN, R);
+        }
+
 
         // Here the steps will be similar as in route_to_model step:
         // 1. Search for a nearby pillar, include other mini pillars
